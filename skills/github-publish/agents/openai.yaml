@@ -1,0 +1,6 @@
+interface:
+  display_name: "GitHub 智能提交"
+  short_description: "检查项目改动并生成清晰说明后安全提交到 GitHub"
+  default_prompt: "使用 $github-publish 检查当前项目改动，生成准确的提交说明并提交、推送到 GitHub。"
+policy:
+  allow_implicit_invocation: true
