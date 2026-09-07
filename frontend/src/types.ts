@@ -1,5 +1,5 @@
 export type Page = {id:string;role:string;title:string;body:string;highlights:string[];visual_direction:string;narration:string;review_flags:string[]};
-export type Project = {id:string;revision:number;pace:number;created_at:string;generation_meta:{model:string};content:{title:string;source_summary:string;audience:string;style:string;pages:Page[];closing_cta:string}};
+export type Project = {id:string;revision:number;aspect_ratio?:'9:16'|'16:9';pace:number;created_at:string;generation_meta:{model:string};content:{title:string;source_summary:string;audience:string;style:string;pages:Page[];closing_cta:string}};
 export type Settings = {base_url:string;model:string;key_configured:boolean};
 export async function api<T>(path:string, method='GET', data?:unknown):Promise<T>{
  const r=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});

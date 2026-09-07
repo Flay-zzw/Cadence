@@ -19,3 +19,15 @@ def test_invalid_json_is_repaired_once():
     assert len(result.pages) == 4
     assert completions.calls == 2
     assert audit[0] == 'invalid json'
+
+
+def test_portrait_accepts_empty_narration():
+    content = demo_content()
+    for page in content.pages:
+        page.narration = ''
+    class Completions:
+        async def create(self, **kwargs):
+            return SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(content=content.model_dump_json(), refusal=None))])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    result = asyncio.run(structured(client, 'test', Content, '图文', [], '9:16'))
+    assert all(page.narration == '' for page in result.pages)

@@ -1,0 +1,18 @@
+.modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.modal-actions > button {
+  width: 100%;
+}
+
+.connection-success {
+  color: #386745;
+  background: #edf5e8;
+  border: 1px solid #cddfc5;
+  border-radius: 7px;
+  padding: 10px 12px;
+  font-size: 11px;
+}

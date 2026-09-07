@@ -13,7 +13,7 @@ class Page(StrictModel):
     body: str = Field(min_length=1, max_length=400)
     highlights: list[Annotated[str, Field(min_length=1, max_length=80)]] = Field(min_length=1, max_length=3)
     visual_direction: str = Field(max_length=300)
-    narration: str = Field(min_length=1, max_length=600)
+    narration: str = Field(max_length=600)
     review_flags: list[str]
 
 
@@ -27,6 +27,7 @@ class Content(StrictModel):
 
 
 class Generate(StrictModel):
+    aspect_ratio: Literal['9:16', '16:9'] = '9:16'
     article: str = Field(min_length=100, max_length=20000)
     audience: str = Field(default='普通成年人', min_length=1, max_length=100)
     tone: str = Field(default='亲切、清晰、有好奇心', min_length=1, max_length=100)

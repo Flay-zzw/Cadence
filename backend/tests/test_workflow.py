@@ -55,6 +55,47 @@ def test_settings_and_origin(client):
     assert client.get('/api/health',headers={'host':'untrusted.example'}).status_code == 403
 
 
+@pytest.mark.parametrize('ratio', ['9:16', '16:9'])
+def test_format_persists_and_controls_exports(client, monkeypatch, ratio):
+    monkeypatch.setattr('app.main.configured', lambda: {'model': 'test'})
+    async def generate(*args):
+        return demo_content()
+    monkeypatch.setattr(llm, 'generate_content', generate)
+    job = client.post('/api/generations', json={'article': '彩虹来自光在水滴中的折射。'*20, 'aspect_ratio': ratio}).json()
+    result = client.get('/api/generations/'+job['id']).json()
+    project = client.get('/api/projects/'+result['project_id']).json()
+    assert project['aspect_ratio'] == ratio
+    assert all(bool(p['narration']) == (ratio == '16:9') for p in project['content']['pages'])
+    prefix = '/api/projects/'+project['id']
+    assert client.get(prefix+'/export/script').status_code == (200 if ratio == '16:9' else 400)
+    html = client.get(prefix+'/export/html').text
+    assert ('slide portrait' if ratio == '9:16' else 'slide landscape') in html
+    assert 'SCIENCE NOTES' not in html
+    page = project['content']['pages'][0]
+    page['narration'] = '编辑时尝试写入口播'
+    edited = client.patch(prefix+'/pages/'+page['id'], json={'page': page, 'revision': 1}).json()
+    assert edited['content']['pages'][0]['narration'] == ('' if ratio == '9:16' else page['narration'])
+
+
+def test_invalid_format(client):
+    assert client.post('/api/generations', json={'article': '科普素材。'*30, 'aspect_ratio': '1:1'}).status_code == 422
+
+
+def test_model_connection_without_saving(client, monkeypatch):
+    captured = {}
+    async def connect(base_url, model, api_key):
+        captured.update(base_url=base_url, model=model, api_key=api_key)
+        return {'ok': True, 'message': '连接成功，API Key 和模型均可用。'}
+    monkeypatch.setattr(llm, 'test_connection', connect)
+    response = client.post('/api/settings/model/test', json={
+        'base_url': 'https://example.com/v1', 'model': 'test-model', 'api_key': 'test-key'
+    })
+    assert response.status_code == 200
+    assert response.json()['ok'] is True
+    assert captured == {'base_url': 'https://example.com/v1', 'model': 'test-model', 'api_key': 'test-key'}
+    assert not (storage.DATA/'settings.json').exists()
+
+
 def test_regenerate_conflict(client, monkeypatch):
     monkeypatch.setattr('app.main.configured', lambda: {'model':'test','base_url':'https://api.openai.com/v1'})
     project = client.post('/api/projects/demo').json()
