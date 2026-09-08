@@ -26,6 +26,20 @@ class Content(StrictModel):
     closing_cta: str
 
 
+class PlannedPage(StrictModel):
+    role: Page.model_fields['role'].annotation
+    title: str = Field(min_length=1, max_length=60)
+    brief: str = Field(min_length=1, max_length=500)
+
+
+class Outline(StrictModel):
+    title: str = Field(min_length=1, max_length=100)
+    source_summary: str
+    audience: str
+    pages: list[PlannedPage] = Field(min_length=4, max_length=12)
+    closing_cta: str
+
+
 class Generate(StrictModel):
     aspect_ratio: Literal['9:16', '16:9'] = '9:16'
     article: str = Field(min_length=100, max_length=20000)

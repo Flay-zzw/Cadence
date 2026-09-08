@@ -1,4 +1,5 @@
 import json
+import asyncio
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
@@ -45,6 +46,66 @@ def test_generation_success_and_failure(client, monkeypatch):
     job = client.post('/api/generations', json={'article':'有效的测试素材。'*30}).json()
     assert client.get('/api/generations/'+job['id']).json()['status'] == 'failed'
     assert client.post('/api/generations', json={'article':'太短'}).status_code == 422
+
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_live_progress_persisted_before_page_returns(client, monkeypatch, fail):
+    monkeypatch.setattr('app.main.configured', lambda: {'model': 'test'})
+    async def generate(request, config, update, audit):
+        content = demo_content()
+        update('规划', stage='planning')
+        update('逐页生成', stage='writing', planned_pages=[p.model_dump() for p in content.pages])
+        update('第一页', page_index=1)
+        update('修复第一页', attempt=2)
+        path = next((storage.DATA/'jobs').glob('*.json'))
+        live = (await asyncio.to_thread(client.get, '/api/generations/'+path.stem)).json()
+        assert live['status'] == 'running'
+        assert live['total_pages'] == 4
+        assert live['current_page'] == 1
+        assert live['completed_pages'] == 0
+        assert live['pages'][0]['attempt'] == 2
+        assert live['pages'][0]['started_at']
+        update('第一页完成', completed_page=content.pages[0].model_dump())
+        update('第二页', page_index=2)
+        if fail: raise ValueError('invalid')
+        for i in range(2, 5):
+            if i != 2: update('下一页', page_index=i)
+            update('页面完成', completed_page=content.pages[i-1].model_dump())
+        update('校验', stage='validating')
+        return content
+    monkeypatch.setattr(llm, 'generate_content', generate)
+    queued = client.post('/api/generations', json={'article':'测试素材。'*30}).json()
+    assert queued['status'] == 'queued'
+    assert queued['total_pages'] is None
+    result = client.get('/api/generations/'+queued['id']).json()
+    assert result['status'] == ('failed' if fail else 'completed')
+    assert result['finished_at'] >= result['started_at'] >= result['created_at']
+    assert result['completed_pages'] == (1 if fail else 4)
+    assert result['pages'][1]['status'] == ('failed' if fail else 'completed')
+    assert result['pages'][1]['finished_at']
+    assert all(s['finished_at'] for s in result['stages'])
+    if fail:
+        assert result['stage'] == 'writing'
+        assert result['current_page'] == 2
+        assert result['pages'][2]['started_at'] is None
+
+
+def test_restart_closes_active_timers(tmp_path, monkeypatch):
+    from app.progress import Progress, new_job
+    from app.main import recover_jobs
+    monkeypatch.setattr(storage, 'DATA', tmp_path)
+    job = new_job('sample')
+    job['status'] = 'running'
+    path = tmp_path/'jobs'/'sample.json'
+    progress = Progress(path, job)
+    progress.update('生成', stage='writing', planned_pages=[dict(title='测试', role='cover')])
+    progress.update('第一页', page_index=1)
+    recover_jobs()
+    result = json.loads(path.read_text(encoding='utf-8'))
+    assert result['status'] == 'failed'
+    assert result['pages'][0]['status'] == 'failed'
+    assert result['pages'][0]['finished_at'] == result['finished_at']
+    assert result['stages'][-1]['finished_at'] == result['finished_at']
 
 
 def test_settings_and_origin(client):

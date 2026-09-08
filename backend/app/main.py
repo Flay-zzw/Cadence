@@ -14,6 +14,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from . import storage, llm
 from .models import Generate, Settings, Edit, Regenerate
 from .demo import demo_content
+from .progress import Progress, new_job, now
 
 load_dotenv(storage.ROOT / '.env')
 @asynccontextmanager
@@ -111,27 +112,27 @@ async def test_model_settings(value: Settings):
 
 async def run_generation(identifier, request, config):
     path = storage.DATA / 'jobs' / (identifier + '.json')
-    job = {'id': identifier, 'status': 'running', 'message': '正在准备'}
+    job = json.loads(path.read_text(encoding='utf-8'))
+    job.update(status='running', started_at=now())
+    progress = Progress(path, job)
     audit = []
-    def update(message):
-        job['message'] = message
-        storage.write(path, job)
     try:
-        content = await llm.generate_content(request, config, update, audit)
+        progress.update('正在准备', stage='planning')
+        content = await llm.generate_content(request, config, progress.update, audit)
         for i, page in enumerate(content.pages): page.id = f'page-{i+1:02}'
+        progress.update('正在保存项目', stage='saving')
         project = persist(content, config['model'], request.pace, request.aspect_ratio)
-        job.update(status='completed', message='生成完成', project_id=project['id'])
+        progress.finish('completed', '生成完成', project_id=project['id'])
     except Exception as exc:
-        job.update(status='failed', message=llm.friendly_error(exc))
+        progress.finish('failed', llm.friendly_error(exc))
         storage.write(storage.DATA / 'diagnostics' / (identifier + '.json'), {'error_type': type(exc).__name__, 'outputs': audit})
-    storage.write(path, job)
 
 
 @app.post('/api/generations', status_code=202)
 async def create_generation(value: Generate, tasks: BackgroundTasks):
     config = configured()
     identifier = str(uuid4())
-    job = {'id': identifier, 'status': 'queued', 'message': '已加入生成队列'}
+    job = new_job(identifier)
     storage.write(storage.DATA / 'jobs' / (identifier + '.json'), job)
     tasks.add_task(run_generation, identifier, value, config)
     return job
@@ -149,8 +150,12 @@ def recover_jobs():
     for path in (storage.DATA / 'jobs').glob('*.json'):
         job = json.loads(path.read_text(encoding='utf-8'))
         if job['status'] in ('queued', 'running'):
-            job.update(status='failed', message='服务已重启，请重新提交生成。')
-            storage.write(path, job)
+            message = '服务已重启，请重新提交生成。'
+            if job.get('stages'):
+                Progress(path, job).finish('failed', message)
+            else:
+                job.update(status='failed', message=message, finished_at=now())
+                storage.write(path, job)
 
 
 @app.post('/api/projects/demo')
