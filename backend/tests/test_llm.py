@@ -44,6 +44,9 @@ def test_generation_plans_then_emits_real_page_boundaries(monkeypatch, ratio):
     events = []
     class Client:
         def __init__(self, **kwargs):
+            assert kwargs['timeout'].read == 600
+            assert kwargs['timeout'].connect == 20
+            assert kwargs['max_retries'] == 0
             self.chat = SimpleNamespace(completions=self)
             self.page_calls = 0
         async def __aenter__(self): return self
@@ -67,3 +70,23 @@ def test_generation_plans_then_emits_real_page_boundaries(monkeypatch, ratio):
     assert next(e['planned_pages'] for e in events if 'planned_pages' in e)[0]['title'] == content.pages[0].title
     assert events[-1]['stage'] == 'validating'
     assert all(bool(p.narration) == (ratio == '16:9') for p in result.pages)
+
+
+def test_model_clients_allow_slow_responses_without_hidden_network_retries(monkeypatch):
+    captured = []
+    class Client:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+            self.chat = SimpleNamespace(completions=self)
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def create(self, **kwargs):
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='连接成功'))])
+    monkeypatch.setattr(llm, 'AsyncOpenAI', Client)
+    async def result(*args, **kwargs): return demo_content().pages[0]
+    monkeypatch.setattr(llm, 'structured', result)
+    asyncio.run(llm.test_connection('http://test', 'test', 'test-key'))
+    asyncio.run(llm.regenerate_page({'content': {}}, {}, '重写', {'base_url':'http://test','model':'test'}, []))
+    assert captured[0]['timeout'].read == 90
+    assert captured[1]['timeout'].read == 600
+    assert all(c['timeout'].connect == 20 and c['max_retries'] == 0 for c in captured)
