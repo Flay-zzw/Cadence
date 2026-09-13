@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from . import storage, llm
+from . import storage, llm, presentation
 from .models import Generate, Settings, Edit, Regenerate
 from .demo import demo_content
 from .progress import Progress, new_job, now
@@ -26,6 +26,7 @@ async def lifespan(app):
 app = FastAPI(title='Cadence Studio', version='0.1.0', lifespan=lifespan)
 locks: dict[str, asyncio.Lock] = {}
 templates = Environment(loader=FileSystemLoader(storage.ROOT / 'app' / 'templates'), autoescape=select_autoescape())
+templates.globals.update(icons=presentation.ICONS, roles=presentation.ROLES, role_icons=presentation.ROLE_ICONS, paragraphs=presentation.paragraphs, point_parts=presentation.point_parts)
 
 
 @app.exception_handler(RequestValidationError)
@@ -125,7 +126,7 @@ async def run_generation(identifier, request, config):
         progress.finish('completed', '生成完成', project_id=project['id'])
     except Exception as exc:
         progress.finish('failed', llm.friendly_error(exc))
-        storage.write(storage.DATA / 'diagnostics' / (identifier + '.json'), {'error_type': type(exc).__name__, 'outputs': audit})
+        storage.write(storage.DATA / 'diagnostics' / (identifier + '.json'), {**llm.error_diagnostics(exc), 'outputs': audit})
 
 
 @app.post('/api/generations', status_code=202)
@@ -203,7 +204,7 @@ async def regenerate(identifier: str, page_id: str, value: Regenerate):
     try:
         page = await llm.regenerate_page(project, project['content']['pages'][i], value.instruction, config, audit)
     except Exception as exc:
-        storage.write(storage.DATA / 'diagnostics' / (str(uuid4()) + '.json'), {'error_type': type(exc).__name__, 'outputs': audit})
+        storage.write(storage.DATA / 'diagnostics' / (str(uuid4()) + '.json'), {**llm.error_diagnostics(exc), 'outputs': audit})
         raise HTTPException(502, llm.friendly_error(exc))
     page.id = page_id
     return await edit_page(identifier, page_id, Edit(page=page, revision=value.revision))

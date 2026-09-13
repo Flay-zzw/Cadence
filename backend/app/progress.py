@@ -11,7 +11,7 @@ def new_job(identifier):
     timestamp = now()
     return dict(id=identifier, status='queued', message='已加入生成队列', stage='queued',
                 created_at=timestamp, updated_at=timestamp, started_at=None, finished_at=None,
-                total_pages=None, current_page=None, completed_pages=0, attempt=0,
+                total_pages=None, current_page=None, last_processed_page=None, completed_pages=0, attempt=0,
                 stages=[dict(id='queued', started_at=timestamp, finished_at=None)], pages=[])
 
 
@@ -32,7 +32,7 @@ class Progress:
                                  started_at=None, finished_at=None, attempt=0)
                             for i, p in enumerate(planned_pages, 1)]
         if page_index is not None:
-            job.update(current_page=page_index, attempt=0)
+            job.update(current_page=page_index, last_processed_page=page_index, attempt=0)
             job['pages'][page_index-1].update(status='running', started_at=timestamp)
         if attempt is not None:
             job['attempt'] = attempt

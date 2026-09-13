@@ -202,3 +202,37 @@ def test_key_write_only_and_preserved(client, tmp_path, monkeypatch):
     invalid = client.put('/api/settings/model', json=payload)
     assert invalid.status_code == 422
     assert secret not in invalid.text
+
+
+def test_last_processed_page_survives_validation_and_save(tmp_path):
+    from app.progress import Progress, new_job
+    job = new_job('last-page')
+    progress = Progress(tmp_path/'job.json', job)
+    progress.update('生成', stage='writing', planned_pages=[dict(title='总结', role='summary')])
+    progress.update('第一页', page_index=1)
+    progress.update('完成', completed_page={'title':'总结'})
+    progress.update('校验', stage='validating')
+    progress.update('保存', stage='saving')
+    progress.finish('completed', '完成')
+    assert job['current_page'] is None
+    assert job['last_processed_page'] == 1
+    assert job['pages'][0]['finished_at']
+
+
+def test_export_visual_cards_escape_text_and_match_preview_assets(client):
+    from pathlib import Path
+    from app.presentation import paragraphs, point_parts
+    project = client.post('/api/projects/demo').json()
+    page = project['content']['pages'][0]
+    page['highlights'] = ['1. 关键行动：<script>alert(1)</script>']
+    client.patch(f'/api/projects/{project["id"]}/pages/{page["id"]}', json={'page':page,'revision':1})
+    html = client.get(f'/api/projects/{project["id"]}/export/html').text
+    assert '<strong>关键行动</strong>' in html
+    assert '<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>' in html
+    assert 'class="concept-icon"' in html and '<svg viewBox=' in html
+    assert point_parts('2、观察：保留说明') == {'title':'观察','detail':'保留说明'}
+    text = '这是第一句话。'*20
+    assert ''.join(paragraphs(text)) == text
+    root = Path(__file__).resolve().parents[2]
+    for name in ['deck.css','slide-icons.json']:
+        assert (root/'frontend/src'/name).read_bytes() == (root/'backend/app/templates'/name).read_bytes()

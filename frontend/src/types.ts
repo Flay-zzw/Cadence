@@ -4,7 +4,7 @@ export type Settings = {base_url:string;model:string;key_configured:boolean};
 export type GenerationJob = {
  id:string; status:'queued'|'running'|'completed'|'failed'; message:string; project_id?:string;
  stage?:string; created_at?:string; started_at?:string|null; finished_at?:string|null; updated_at?:string;
- total_pages?:number|null; current_page?:number|null; completed_pages?:number; attempt?:number;
+ total_pages?:number|null; current_page?:number|null; last_processed_page?:number|null; completed_pages?:number; attempt?:number;
  stages?:{id:string;started_at:string;finished_at:string|null}[];
  pages?:{index:number;title:string;role:string;status:'pending'|'running'|'completed'|'failed';started_at:string|null;finished_at:string|null;attempt:number}[];
 };
