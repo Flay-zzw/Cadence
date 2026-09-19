@@ -54,11 +54,18 @@ def error_diagnostics(exc):
     return {'error_type': type(exc).__name__, 'causes': causes}
 
 
+def network_access_denied(exc):
+    return any(item.get('errno') in (1, 13) or item.get('winerror') in (5, 10013)
+               for item in error_diagnostics(exc)['causes'])
+
+
 def friendly_error(exc):
     if isinstance(exc, AuthenticationError): return 'API Key 无效，请检查 backend/.env。'
     if isinstance(exc, RateLimitError): return '模型服务额度不足或请求过于频繁，请检查账户后重试。'
     if isinstance(exc, (APITimeoutError, TimeoutError, httpx.TimeoutException)): return '等待模型响应超过时限（最长 10 分钟），请重试或更换模型。'
     if isinstance(exc, (APIConnectionError, httpx.TransportError)):
+        if network_access_denied(exc):
+            return '后端进程的联网权限被拒绝。请停止当前后端，在普通终端或双击 start-backend.cmd 重新启动；由助手启动时需使用允许联网的运行环境。若仍失败，请检查防火墙权限。'
         causes = {item['type'] for item in error_diagnostics(exc)['causes']}
         if 'SSLEOFError' in causes:
             return '模型服务的 TLS 连接被提前关闭，请检查代理或服务连接；可在本项目配置直连。'
@@ -74,7 +81,7 @@ def connection_error(exc):
     if isinstance(exc, AuthenticationError): return '连接到服务，但 API Key 无效或无权访问该业务空间。'
     if isinstance(exc, RateLimitError): return '连接到服务，但额度不足或请求过于频繁。'
     if isinstance(exc, APITimeoutError): return '连接测试超时（响应等待上限 90 秒），请检查网络、代理或稍后重试。'
-    if isinstance(exc, APIConnectionError): return '无法连接模型服务，请检查网络、代理和 Base URL。'
+    if isinstance(exc, (APIConnectionError, httpx.TransportError)): return friendly_error(exc)
     if isinstance(exc, BadRequestError): return '连接到服务，但模型名称不可用或请求被拒绝。'
     return friendly_error(exc)
 
@@ -102,7 +109,8 @@ async def receive_json(client, model, messages, schema, on_transport=None):
                 if finish is None:
                     raise httpx.RemoteProtocolError('Stream ended without completion marker')
                 return ''.join(parts), finish, refusal
-            except (APIConnectionError, httpx.TransportError):
+            except (APIConnectionError, httpx.TransportError) as exc:
+                if network_access_denied(exc): raise
                 if network_attempt: raise
                 if on_transport: on_transport('连接暂时中断，正在重试当前请求（1/1）')
                 await asyncio.sleep(1)

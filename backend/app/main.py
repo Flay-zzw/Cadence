@@ -108,6 +108,8 @@ async def test_model_settings(value: Settings):
     try:
         return await llm.test_connection(value.base_url, value.model, key)
     except Exception as exc:
+        storage.write(storage.DATA / 'diagnostics' / ('connection-' + str(uuid4()) + '.json'),
+                      {'created_at': now(), **llm.error_diagnostics(exc)})
         raise HTTPException(400, llm.connection_error(exc)) from exc
 
 

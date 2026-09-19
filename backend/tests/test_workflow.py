@@ -157,6 +157,25 @@ def test_model_connection_without_saving(client, monkeypatch):
     assert not (storage.DATA/'settings.json').exists()
 
 
+def test_connection_failure_saves_only_safe_diagnostics(client, monkeypatch):
+    import httpx
+    async def connect(*args):
+        error = llm.APIConnectionError(request=httpx.Request('POST', 'https://example.com'))
+        error.__cause__ = PermissionError(13, 'secret-key private article')
+        raise error
+    monkeypatch.setattr(llm, 'test_connection', connect)
+    response = client.post('/api/settings/model/test', json={
+        'base_url': 'https://example.com/v1', 'model': 'test', 'api_key': 'secret-key'})
+    assert response.status_code == 400
+    assert '联网权限被拒绝' in response.json()['detail']
+    files = list((storage.DATA/'diagnostics').glob('connection-*.json'))
+    assert len(files) == 1
+    saved = files[0].read_text(encoding='utf-8')
+    assert 'PermissionError' in saved
+    assert 'secret-key' not in saved and 'private article' not in saved
+    assert 'example.com' not in saved
+
+
 def test_regenerate_conflict(client, monkeypatch):
     monkeypatch.setattr('app.main.configured', lambda: {'model':'test','base_url':'https://api.openai.com/v1'})
     project = client.post('/api/projects/demo').json()

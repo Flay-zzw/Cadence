@@ -204,3 +204,28 @@ def test_model_proxy_can_be_disabled_without_changing_system(monkeypatch):
     assert captured == {'trust_env': False}
     monkeypatch.setenv('CADENCE_USE_SYSTEM_PROXY', 'true')
     assert 'http_client' not in llm.model_client(api_key='test')
+
+
+def test_network_permission_failure_is_actionable_and_not_retried():
+    import httpx
+    error = llm.APIConnectionError(request=httpx.Request('POST', 'https://example.com'))
+    error.__cause__ = PermissionError(13, 'private credential')
+    calls = []
+    class Completions:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            raise error
+    assert '联网权限被拒绝' in llm.connection_error(error)
+    assert 'private credential' not in llm.connection_error(error)
+    with pytest.raises(llm.APIConnectionError):
+        asyncio.run(llm.structured(SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+                                  'test', Content, 'generate', []))
+    assert len(calls) == 1
+
+
+def test_connection_test_reports_tls_disconnect():
+    import ssl
+    import httpx
+    error = llm.APIConnectionError(request=httpx.Request('POST', 'https://example.com'))
+    error.__cause__ = ssl.SSLEOFError(8, 'private upstream message')
+    assert 'TLS' in llm.connection_error(error)
