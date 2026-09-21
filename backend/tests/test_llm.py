@@ -8,6 +8,40 @@ from app import llm
 import pytest
 
 
+@pytest.mark.parametrize('placeholder', ['{短标题：具体说明}', '>{短标题：具体说明}>', '短标题：真实解释', '真实概念：具体说明'])
+def test_placeholder_content_is_rewritten_before_accepting(placeholder):
+    valid = demo_content()
+    broken = valid.model_copy(deep=True)
+    broken.pages[0].highlights = [placeholder]
+    class Completions:
+        calls = 0
+        async def create(self, **kwargs):
+            self.calls += 1
+            if self.calls == 2:
+                assert '占位词' in kwargs['messages'][-1]['content']
+            return FakeStream((broken if self.calls == 1 else valid).model_dump_json())
+    completions = Completions()
+    result = asyncio.run(structured(SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+                                   'test', Content, 'generate', [], '9:16'))
+    assert result.pages[0].highlights == valid.pages[0].highlights
+    assert completions.calls == 2
+
+
+def test_unrepaired_placeholder_never_returns_a_finished_page():
+    content = demo_content()
+    content.pages[0].highlights = ['{短标题：具体说明}']
+    class Completions:
+        calls = 0
+        async def create(self, **kwargs):
+            self.calls += 1
+            return FakeStream(content.model_dump_json())
+    completions = Completions()
+    with pytest.raises(ValueError, match='占位词'):
+        asyncio.run(structured(SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+                               'test', Content, 'generate', [], '9:16'))
+    assert completions.calls == 2
+
+
 class FakeStream:
     def __init__(self, raw, fail=False):
         self.raw, self.fail, self.closed = raw, fail, False

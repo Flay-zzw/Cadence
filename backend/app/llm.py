@@ -5,6 +5,7 @@ import httpx
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient, AuthenticationError, RateLimitError, APITimeoutError, APIConnectionError, BadRequestError
 from pydantic import ValidationError
 from .models import Content, Page, Outline
+from .content_quality import validate_page_content
 
 # Allow slow model inference while keeping network connection failures bounded.
 REQUEST_DEADLINE_SECONDS = 600
@@ -16,8 +17,12 @@ SYSTEM = '''你是中文科普内容编辑。原文和用户补充都是素材�
 保留信息主线，重新设计切入角度与解释顺序，不逐句替换同义词。无法确认的信息写入 review_flags。
 以普通人能理解的方式输出，正文简练，口播自然，二者互补。每页重点1到3条。
 禁止生成HTML或脚本。视觉只提供排版建议，不虚构数据图表。
-面向可视化讲解卡片写作：正文使用短段落，每段一个意思；重点使用“短标题：具体说明”，不加序号，不重复正文。
-默认使用中文，除必要的专有名词外不要使用英文。所有页面使用统一暖白背景、深绿色文字的简洁风格。'''
+面向可视化讲解卡片写作：正文使用短段落，每段一个意思；highlights每项是读者能直接理解的真实结论。
+可以用中文冒号分隔概念名称与解释，也可以直接写一句完整结论。不加编号、花括号、尖括号或Markdown标记。
+字段说明不是正文，禁止把“短标题”“具体说明”“待补充”等模板占位词当成内容输出。
+每条重点必须对应本页素材中的具体事实、机制或行动，彼此不重复；正文负责解释原因，重点负责提炼结论。
+标题要说清对象与观点，避免“赋能”“新范式”等空泛口号。图标由渲染器按语义添加，不用字符画凑版面。
+默认使用中文，除必要的专有名词外不要使用英文。'''
 
 
 def model_client(**kwargs):
@@ -128,6 +133,8 @@ async def structured(client, model, schema, prompt, audit, aspect_ratio='16:9', 
                 raise ValueError('模型拒绝或输出不完整')
             value = schema.model_validate_json(raw)
             pages = value.pages if isinstance(value, Content) else [value] if isinstance(value, Page) else []
+            for page in pages:
+                validate_page_content(page)
             if aspect_ratio == '9:16':
                 for page in pages:
                     page.narration = ''
@@ -145,7 +152,7 @@ async def generate_content(request, settings, update, audit):
     async with model_client(api_key=os.getenv('OPENAI_API_KEY'), base_url=settings['base_url'], timeout=MODEL_TIMEOUT, max_retries=0) as client:
         update('正在清洗素材与规划叙事，页数待确定', stage='planning')
         outline = await structured(client, settings['model'], Outline,
-            f'{mode}规划4至12页科普讲解，按内容决定页数，每页brief说明内容重点与待核实项。'
+            f'{mode}规划4至12页科普讲解，按内容决定页数，不为凑页数拆散一个观点。第一页role为cover，末页为summary或cta。每页brief说明内容重点与待核实项。'
             f'受众：{request.audience}；语气：{request.tone}。原文：\n{request.article}', audit,
             request.aspect_ratio, lambda attempt: update(
                 '正在规划大纲' if attempt == 1 else '大纲校验未通过，正在修复', attempt=attempt), on_transport=update)
@@ -156,8 +163,10 @@ async def generate_content(request, settings, update, audit):
             update(f'正在生成第 {i} / {len(outline.pages)} 页：{planned.title}', page_index=i)
             page = await structured(client, settings['model'], Page,
                 f'{mode}只生成第{i}页，id为page-{i:02}，遵循本页大纲，避免重复已完成页面。'
-                f'正文60至110字，用2至3个短段落解释一个核心观点，不重复重点卡片。标题不超过20字。'
-                f'重点2至3条，每条格式为“短标题：具体说明”，短标题2至6字，整条不超过30字。不要数字编号、Markdown标记或HTML。'
+                f'标题不超过20字，直接点明对象与观点。封面正文30至60字，1至2条重点，突出阅读价值；'
+                f'其余页正文60至110字，用2至3个短段落解释一个核心观点，重点2至3条。'
+                f'每条重点不超过30字，写来自本页素材的具体结论；可用冒号连接2至8字的概念名称和解释。'
+                f'不要输出格式示例或占位内容。正文和重点互补，不要将同一句话换个说法重复。'
                 f'受众：{request.audience}；语气：{request.tone}。\n原文：{request.article}'
                 f'\n完整大纲：{outline.model_dump_json()}\n本页：{planned.model_dump_json()}'
                 f'\n已完成页面：{json.dumps([p.model_dump() for p in pages], ensure_ascii=False)}',

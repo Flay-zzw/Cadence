@@ -253,5 +253,5 @@ def test_export_visual_cards_escape_text_and_match_preview_assets(client):
     text = '这是第一句话。'*20
     assert ''.join(paragraphs(text)) == text
     root = Path(__file__).resolve().parents[2]
-    for name in ['deck.css','slide-icons.json']:
+    for name in ['deck.css','slide-icons.json','visual-rules.json']:
         assert (root/'frontend/src'/name).read_bytes() == (root/'backend/app/templates'/name).read_bytes()

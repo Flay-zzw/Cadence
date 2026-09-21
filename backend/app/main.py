@@ -27,6 +27,7 @@ app = FastAPI(title='Cadence Studio', version='0.1.0', lifespan=lifespan)
 locks: dict[str, asyncio.Lock] = {}
 templates = Environment(loader=FileSystemLoader(storage.ROOT / 'app' / 'templates'), autoescape=select_autoescape())
 templates.globals.update(icons=presentation.ICONS, roles=presentation.ROLES, role_icons=presentation.ROLE_ICONS, paragraphs=presentation.paragraphs, point_parts=presentation.point_parts)
+templates.globals.update(semantic_icon=presentation.semantic_icon, visible_points=presentation.visible_points)
 
 
 @app.exception_handler(RequestValidationError)
@@ -63,7 +64,7 @@ def persist(content, model, pace=180, aspect_ratio='16:9'):
         for page in content.pages:
             page.narration = ''
     value = {'id': str(uuid4()), 'revision': 1, 'created_at': datetime.now(timezone.utc).isoformat(), 'pace': pace,
-             'aspect_ratio': aspect_ratio, 'content': content.model_dump(), 'generation_meta': {'model': model, 'prompt_version': 'v2'}}
+             'aspect_ratio': aspect_ratio, 'content': content.model_dump(), 'generation_meta': {'model': model, 'prompt_version': 'v3'}}
     storage.write(storage.project_path(value['id']), value)
     return value
 
